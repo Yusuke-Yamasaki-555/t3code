@@ -164,3 +164,28 @@ it("clears relay tracing permission when the primary session ends", () => {
 
   expect(answers).toEqual([true, null, false]);
 });
+
+it("defaults omitted relayTracingAllowed in server config to false", () => {
+  const omitted = config([], undefined);
+  const sessionConfig = Atom.make<ServerConfig | null>(omitted);
+  using _session = vi
+    .spyOn(environmentSession, "initialConfigValueAtom")
+    .mockReturnValue(sessionConfig);
+  const lastProjection = serverEnvironment.configProjection({ environmentId: PRIMARY, input: {} });
+  const registry = AtomRegistry.make({
+    initialValues: [
+      [primaryEnvironmentIdAtom, PRIMARY],
+      [
+        lastProjection,
+        AsyncResult.success({
+          config: omitted,
+          latestEvent: { type: "snapshot", config: omitted },
+          source: "live",
+        }),
+      ],
+    ],
+  });
+  registries.push(registry);
+
+  expect(registry.get(primaryRelayTracingAllowedAtom)).toBe(false);
+});

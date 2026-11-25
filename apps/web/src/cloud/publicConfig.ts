@@ -71,12 +71,12 @@ export function setServerRelayTelemetry(allowed: boolean | null): void {
 }
 
 export function relayTelemetryEnabled(): boolean | null {
-  if (typeof window === "undefined") return true;
+  if (typeof window === "undefined") return false;
   if (window.desktopBridge) {
     desktopRelayTelemetry ??= window.desktopBridge.getRelayTelemetryEnabled();
     return desktopRelayTelemetry;
   }
-  return serverRelayTelemetry ?? (isHostedStaticApp() ? true : null);
+  return serverRelayTelemetry ?? (isHostedStaticApp() ? false : null);
 }
 
 export function resolveRelayTracingConfig() {
