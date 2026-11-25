@@ -34,6 +34,28 @@ it.effect("a policy with telemetry off stops relay tracing to T3 Connect", () =>
   }),
 );
 
+it.effect("relay tracing sends nothing by default when T3CODE_TELEMETRY_ENABLED is unset", () => {
+  const fetchFn = vi.fn<typeof fetch>(async () => new Response(null, { status: 202 }));
+  return Effect.void.pipe(
+    Effect.withSpan("relay.request"),
+    RelayTracing.withRelayClientTracing,
+    Layer.effectDiscard,
+    Layer.provide(
+      relayLayer(
+        { serviceName: "t3code-server", runtime: "node", client: "environment-server" },
+        { tracesUrl: "https://traces.example.com", tracesDataset: "relay", tracesToken: "token" },
+      ),
+    ),
+    Layer.provide(ManagedPolicy.layerTest()),
+    Layer.provide(Layer.succeed(HostProcess.Environment, {})),
+    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(Layer.succeed(FetchHttpClient.Fetch, fetchFn)),
+    Layer.build,
+    Effect.scoped,
+    Effect.andThen(Effect.sync(() => assert.strictEqual(fetchFn.mock.calls.length, 0))),
+  );
+});
+
 it.effect("relay tracing waits for the desktop shell's telemetry opt-out", () => {
   const fetchFn = vi.fn<typeof fetch>(async () => new Response(null, { status: 202 }));
   const environment: NodeJS.ProcessEnv = { T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING: "1" };
@@ -66,7 +88,8 @@ it.effect("relay tracing waits for the desktop shell's telemetry opt-out", () =>
 });
 
 it("reports the server's relay tracing policy to clients", () => {
-  assert.isTrue(allowedFor({}, undefined));
+  assert.isFalse(allowedFor({}, undefined));
+  assert.isTrue(allowedFor({ T3CODE_TELEMETRY_ENABLED: "true" }, undefined));
   assert.isFalse(allowedFor({ T3CODE_TELEMETRY_ENABLED: "false" }, undefined));
   assert.isFalse(allowedFor({ CI: "true" }, undefined));
   assert.isTrue(allowedFor({ CI: "true", T3CODE_TELEMETRY_ENABLED: "true" }, undefined));

@@ -143,16 +143,14 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("telemetry identi
     }).pipe(Effect.provide(layerIdentity("t3-telemetry-identify-read-", logs)));
   });
 
-  it.effect("reads only the linked Connect account as an owner", () =>
+  it.effect("returns no server owners even when a Connect account is linked", () =>
     Effect.gen(function* () {
       const secrets = yield* ServerSecretStore.ServerSecretStore;
       assert.deepEqual(yield* Identify.getServerOwners, []);
 
       yield* secrets.set(CLOUD_LINKED_USER_ID, new TextEncoder().encode("user_connect"));
 
-      assert.deepEqual(yield* Identify.getServerOwners, [
-        { source: "connect", ownerId: yield* sha256("user_connect") },
-      ]);
+      assert.deepEqual(yield* Identify.getServerOwners, []);
     }).pipe(Effect.provide(layerIdentity("t3-telemetry-identify-owners-"))),
   );
 });

@@ -1,6 +1,6 @@
 // T3 ingest retains events and forwards to PostHog; UUIDs deduplicate retries there.
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import { isCiEnvironment, isDoNotTrackSet } from "@t3tools/shared/otelEnvironment";
+import { isDoNotTrackSet } from "@t3tools/shared/otelEnvironment";
 import type { ClientOs } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Config from "effect/Config";
@@ -53,10 +53,6 @@ const SHUTDOWN_FLUSH_TIMEOUT = "1 second";
 // The waiting batch holds newer events back; `maxBufferedEvents` bounds them meanwhile.
 const MAX_BATCH_RETRY_MS = 30 * 60_000;
 const RETRY_BASE_DELAY_MS = 2_000;
-// Clients can report any number of owner ids; past this many per observer, new ones
-// are not sent. Each observer has its own cap, so client reports never crowd out the
-// server's own.
-const MAX_RECORDED_OWNERS = 1_000;
 const RETRY_MAX_DELAY_MS = 300_000;
 // These statuses reject the batch itself; unlike 408/429, retrying cannot help.
 const REJECTED_BATCH_STATUSES = new Set([400, 401, 413]);
@@ -68,12 +64,8 @@ function retryDelayMs(failures: number, random: number): number {
 }
 
 const TelemetryEnvConfig = Config.all({
-  posthogKey: Config.String("T3CODE_POSTHOG_KEY").pipe(
-    Config.withDefault("phc_XOWci4oZP4VvLiEyrFqkFjP4CZn55mjYYBMREK5Wd6m"),
-  ),
-  posthogHost: Config.String("T3CODE_POSTHOG_HOST").pipe(
-    Config.withDefault("https://ingest.t3.codes"),
-  ),
+  posthogKey: Config.String("T3CODE_POSTHOG_KEY").pipe(Config.withDefault("")),
+  posthogHost: Config.String("T3CODE_POSTHOG_HOST").pipe(Config.withDefault("")),
   enabled: Config.Boolean("T3CODE_TELEMETRY_ENABLED").pipe(Config.option),
   flushBatchSize: Config.Number("T3CODE_TELEMETRY_FLUSH_BATCH_SIZE").pipe(Config.withDefault(20)),
   maxBufferedEvents: Config.Number("T3CODE_TELEMETRY_MAX_BUFFERED_EVENTS").pipe(
@@ -127,14 +119,21 @@ export const make = Effect.gen(function* () {
   const telemetryConfig = yield* TelemetryEnvConfig;
   const hostEnvironment = yield* HostProcess.Environment;
   const awaitingShellConsent = hostEnvironment.T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING === "1";
-  const enabledByDefault = !isCiEnvironment(hostEnvironment);
+  const enabledByDefault = false;
   const enabledAtStartup = Option.getOrElse(telemetryConfig.enabled, () => enabledByDefault);
+  const hasConfiguredEndpoint =
+    telemetryConfig.posthogHost.trim() !== "" && telemetryConfig.posthogKey.trim() !== "";
   // A managed policy can switch analytics off over the environment, never on.
   const policyAllows =
     ManagedPolicy.deniedBy(yield* ManagedPolicy.ManagedPolicy, "telemetry") === undefined;
   // A cached PATH does not establish consent from the current login shell.
   const telemetryEnabled = Effect.suspend(() => {
-    if (!enabledAtStartup || !policyAllows || isDoNotTrackSet(hostEnvironment))
+    if (
+      !enabledAtStartup ||
+      !hasConfiguredEndpoint ||
+      !policyAllows ||
+      isDoNotTrackSet(hostEnvironment)
+    )
       return Effect.succeed(false);
     if (!awaitingShellConsent) return Effect.succeed(true);
     if (hostEnvironment.T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING === "1")
@@ -163,9 +162,6 @@ export const make = Effect.gen(function* () {
     failures: 0,
     retryAt: 0,
   });
-  const recordedOwnersRef = yield* Ref.make<
-    Readonly<Record<"server" | "client", ReadonlySet<string>>>
-  >({ server: new Set(), client: new Set() });
   // The background flush and the shutdown flush must not send the same batch at once.
   const flushLock = yield* Semaphore.make(1);
   const clientType = serverConfig.mode === "desktop" ? "desktop-app" : "cli-web-client";
@@ -354,28 +350,7 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  const recordOwners: AnalyticsService["Service"]["recordOwners"] = Effect.fn(
-    "AnalyticsService.recordOwners",
-  )((owners, observedBy) =>
-    Effect.forEach(
-      owners,
-      ({ source, ownerId }) =>
-        Ref.modify(recordedOwnersRef, (recorded) => {
-          const key = `${source}:${ownerId}`;
-          const seen = recorded[observedBy];
-          return seen.has(key) || seen.size >= MAX_RECORDED_OWNERS
-            ? [false, recorded]
-            : [true, { ...recorded, [observedBy]: new Set(seen).add(key) }];
-        }).pipe(
-          Effect.flatMap((isNew) =>
-            isNew
-              ? record("install.owner_observed", { ownerSource: source, ownerId, observedBy })
-              : Effect.void,
-          ),
-        ),
-      { discard: true },
-    ),
-  );
+  const recordOwners: AnalyticsService["Service"]["recordOwners"] = () => Effect.void;
 
   yield* Effect.forever(Effect.sleep(FLUSH_INTERVAL_MS).pipe(Effect.andThen(flushWhenDue)), {
     disableYield: true,
