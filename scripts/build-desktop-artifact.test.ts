@@ -567,7 +567,31 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       );
 
       assert.nestedPropertyVal(linux, "linux.desktop.entry.StartupWMClass", "com.t3tools.T3Code");
+      assert.deepEqual((linux.linux as { target: ReadonlyArray<string> }).target, [
+        "AppImage",
+        "deb",
+      ]);
     }),
+  );
+
+  it.effect("allows skipping the Linux deb target via T3CODE_LINUX_SKIP_DEB", () =>
+    Effect.gen(function* () {
+      const linux = yield* createBuildConfig(
+        "linux",
+        "AppImage",
+        "0.0.33",
+        false,
+        false,
+        undefined,
+        undefined,
+      );
+
+      assert.deepEqual((linux.linux as { target: ReadonlyArray<string> }).target, ["AppImage"]);
+    }).pipe(
+      Effect.provide(
+        ConfigProvider.layer(ConfigProvider.fromEnv({ env: { T3CODE_LINUX_SKIP_DEB: "true" } })),
+      ),
+    ),
   );
 
   it.effect("names updatable AppImages without a version and apart per channel", () =>

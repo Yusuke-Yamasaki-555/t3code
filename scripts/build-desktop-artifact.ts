@@ -2948,11 +2948,14 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
   if (platform === "linux") {
     // Pin the static AppImage runtime so hosts with only FUSE 3 do not need libfuse2.
     buildConfig.toolsets = { appimage: "1.0.3" };
+    const skipLinuxDeb = yield* Config.Boolean("T3CODE_LINUX_SKIP_DEB").pipe(
+      Config.withDefault(false),
+    );
     const path = yield* Path.Path;
     const repoRoot = yield* RepoRoot;
     buildConfig.afterPack = path.join(repoRoot, "scripts/linux-after-pack.ts");
     buildConfig.linux = {
-      target: target === "AppImage" ? [target, "deb"] : [target],
+      target: target === "AppImage" && !skipLinuxDeb ? [target, "deb"] : [target],
       executableName: "t3code",
       icon: "icons",
       category: "Development",
