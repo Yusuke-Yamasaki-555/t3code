@@ -126,6 +126,18 @@ describe.skipIf(HostProcess.Platform.defaultValue() !== "linux")("packaged ELF s
         await expect(
           afterPack({ appOutDir: app, electronPlatformName: "linux", targets: [deb] }),
         ).rejects.toThrow(/helper.*GLIBC_2\.40.*2\.39/s);
+        const previousCeiling = process.env.T3CODE_LINUX_GLIBC_CEILING;
+        process.env.T3CODE_LINUX_GLIBC_CEILING = "2.44";
+        try {
+          await NodeFSP.writeFile(NodePath.join(native, "helper"), elfFixture(machine, "2.42"));
+          expect(await scanGlibcNeeds(app)).toEqual({ minimum: "2.42", elfCount: 3 });
+        } finally {
+          if (previousCeiling === undefined) {
+            delete process.env.T3CODE_LINUX_GLIBC_CEILING;
+          } else {
+            process.env.T3CODE_LINUX_GLIBC_CEILING = previousCeiling;
+          }
+        }
         await NodeFSP.writeFile(NodePath.join(native, "helper"), Buffer.from("\x7fELFbroken"));
         await expect(scanGlibcNeeds(app)).rejects.toThrow(/helper/);
       } finally {

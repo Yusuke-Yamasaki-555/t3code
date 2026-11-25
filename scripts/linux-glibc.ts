@@ -5,8 +5,17 @@ import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
 
 // Both Linux release jobs build on Ubuntu 24.04; this is a build ceiling, not a distro support promise.
-const GLIBC_BUILD_CEILING = "2.39";
+const DEFAULT_GLIBC_BUILD_CEILING = "2.39";
 const readelf = NodeUtil.promisify(NodeChildProcess.execFile);
+
+function resolveGlibcBuildCeiling(): string {
+  const rawCeiling = process.env.T3CODE_LINUX_GLIBC_CEILING?.trim();
+  const buildCeiling = rawCeiling ? rawCeiling : DEFAULT_GLIBC_BUILD_CEILING;
+  if (!/^\d+(?:\.\d+)+$/.test(buildCeiling)) {
+    throw new Error(`Invalid T3CODE_LINUX_GLIBC_CEILING: ${buildCeiling}`);
+  }
+  return buildCeiling;
+}
 
 function compareVersions(left: string, right: string): number {
   const a = left.split(".").map(Number);
@@ -40,6 +49,7 @@ export async function scanGlibcNeeds(appOutDir: string): Promise<{
   minimum: string;
   elfCount: number;
 }> {
+  const buildCeiling = resolveGlibcBuildCeiling();
   let minimum: string | undefined;
   let elfCount = 0;
   async function walk(directory: string): Promise<void> {
@@ -69,10 +79,8 @@ export async function scanGlibcNeeds(appOutDir: string): Promise<{
         });
         if (stderr.trim()) throw new Error(stderr.trim());
         const required = parseGlibcNeeds(stdout);
-        if (required && compareVersions(required, GLIBC_BUILD_CEILING) > 0) {
-          throw new Error(
-            `requires GLIBC_${required}, exceeding build ceiling ${GLIBC_BUILD_CEILING}`,
-          );
+        if (required && compareVersions(required, buildCeiling) > 0) {
+          throw new Error(`requires GLIBC_${required}, exceeding build ceiling ${buildCeiling}`);
         }
         if (required && (!minimum || compareVersions(required, minimum) > 0)) minimum = required;
       } catch (cause) {
@@ -86,7 +94,7 @@ export async function scanGlibcNeeds(appOutDir: string): Promise<{
   await walk(appOutDir);
   if (elfCount === 0 || !minimum) throw new Error(`No glibc requirements found in ${appOutDir}`);
   console.log(
-    `[linux-glibc] ${elfCount} ELF files; requires glibc >= ${minimum}; build ceiling ${GLIBC_BUILD_CEILING}`,
+    `[linux-glibc] ${elfCount} ELF files; requires glibc >= ${minimum}; build ceiling ${buildCeiling}`,
   );
   return { minimum, elfCount };
 }
